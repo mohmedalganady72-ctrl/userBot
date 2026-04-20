@@ -1,69 +1,74 @@
 from telethon import TelegramClient, events
-from time import time
-
-from dotenv import load_dotenv
-import os
-import re
-import asyncio
-from collections import OrderedDict, deque
+from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
 
-# ====================== إعدادات ======================
+from time import time
+from dotenv import load_dotenv
+import os
+import asyncio
+from collections import OrderedDict, deque
+import random
 
-
-
-# تحميل ملف .env
+# ====================== تحميل env ======================
 load_dotenv()
 
 api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
+session = os.getenv("SESSION")
 
-COOLDOWN_SECONDS = 45
-MAX_CACHE_SIZE = 5000          # زدنا للضغط العالي
+# ====================== إعدادات ======================
+COOLDOWN_SECONDS = 60
+MAX_CACHE_SIZE = 5000
 MAX_MESSAGE_LENGTH = 150
 MIN_SCORE = 4
 
-MAX_FORWARDS_PER_SECOND = 8    # أنصح بخفضه إلى 6-8 للأمان
-FORWARD_QUEUE_MAX_SIZE = 8000
+MAX_FORWARDS_PER_SECOND = 3   # 🔥 أمان أكثر من 4
+FORWARD_QUEUE_MAX_SIZE = 2000  # 🔥 تقليل الضغط
 
-# ====================== Weighted Scoring ======================
-# (نفس الكود السابق بدون تغيير - normalize + calculate_score + smart_filter)
-
-# ====================== الكاش والـ Queue ======================
+# ====================== الكاش ======================
 forward_queue: deque = deque()
 cooldown: OrderedDict = OrderedDict()
 last_forward_time = 0.0
 processing_task = None
 
+# ====================== العميل ======================
 client = TelegramClient(
-    "session", 
-    api_id, 
+    StringSession(session),
+    api_id,
     api_hash,
-    flood_sleep_threshold=60   # Telethon ينام تلقائياً للـ Flood أقل من 60 ثانية
+    flood_sleep_threshold=60
 )
 
+# ====================== فلترة (إذا عندك smart_filter لازم تكون معرفة) ======================
+def smart_filter(text):
+    return len(text) > 0  # مثال بسيط (عدله حسب احتياجك)
+
+# ====================== معالجة الرسائل ======================
 async def should_process(event):
     if event.out or not event.text:
         return None
+
     if not smart_filter(event.text):
         return None
 
-    # استخدام sender_id مباشرة (أسرع وأقل استهلاك)
     user_id = event.sender_id
     if user_id is None:
         return None
 
     now = time()
+
     if user_id in cooldown and now - cooldown[user_id] < COOLDOWN_SECONDS:
         return None
 
     cooldown[user_id] = now
     cooldown.move_to_end(user_id)
+
     if len(cooldown) > MAX_CACHE_SIZE:
         cooldown.popitem(last=False)
 
     return event
 
+# ====================== استقبال الرسائل ======================
 @client.on(events.NewMessage(incoming=True))
 async def handler(event):
     result = await should_process(event)
@@ -71,7 +76,7 @@ async def handler(event):
         return
 
     if len(forward_queue) >= FORWARD_QUEUE_MAX_SIZE:
-        print(f"⚠️ Queue ممتلئة ({len(forward_queue)}), تم تجاهل رسالة")
+        print("⚠️ Queue ممتلئة")
         return
 
     forward_queue.append(result)
@@ -80,35 +85,48 @@ async def handler(event):
     if not processing_task or processing_task.done():
         processing_task = asyncio.create_task(process_forward_queue())
 
+# ====================== المعالجة ======================
 async def process_forward_queue():
     global last_forward_time, processing_task
     processing_task = asyncio.current_task()
 
     while forward_queue:
         now = time()
+
         delay = 1.0 / MAX_FORWARDS_PER_SECOND - (now - last_forward_time)
         if delay > 0:
             await asyncio.sleep(delay)
 
         event = forward_queue.popleft()
+
         try:
             await event.forward_to("me")
             last_forward_time = time()
+
+            # 🟡 سليب عشوائي لتقليل الحظر
+            await asyncio.sleep(random.uniform(0.3, 0.8))
+
         except FloodWaitError as e:
-            print(f"🚨 FloodWaitError: انتظر {e.seconds} ثانية")
-            await asyncio.sleep(e.seconds + 2)   # +2 ثواني احتياط
-            forward_queue.appendleft(event)      # إعادة للمقدمة
+            print(f"🚨 FloodWait: {e.seconds} ثانية")
+            await asyncio.sleep(e.seconds + 2)
+            forward_queue.appendleft(event)
+
         except Exception as e:
-            print(f"❌ خطأ غير متوقع أثناء forward: {e}")
+            print(f"❌ خطأ: {e}")
             await asyncio.sleep(3)
-            if len(forward_queue) < FORWARD_QUEUE_MAX_SIZE:
-                forward_queue.appendleft(event)
+            forward_queue.appendleft(event)
 
     processing_task = None
 
+# ====================== تشغيل ======================
 async def main():
-    await client.start()
-    print(f"✅ High-Load Userbot جاهز | Forward Rate: {MAX_FORWARDS_PER_SECOND}/ثانية | Queue Max: {FORWARD_QUEUE_MAX_SIZE}")
+    await client.connect()
+
+    if not await client.is_user_authorized():
+        print("❌ SESSION غير صالح")
+        return
+
+    print(f"✅ Userbot شغال | Speed: {MAX_FORWARDS_PER_SECOND}/sec")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
