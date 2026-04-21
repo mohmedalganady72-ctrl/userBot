@@ -6,7 +6,7 @@ from time import time
 from dotenv import load_dotenv
 import os
 import asyncio
-import re  # تم إضافة المكتبة الناقصة
+import re
 from collections import OrderedDict, deque
 import random
 
@@ -23,7 +23,7 @@ MAX_CACHE_SIZE = 5000
 MAX_MESSAGE_LENGTH = 160
 MIN_SCORE = 3.5
 
-MAX_FORWARDS_PER_SECOND = 2 # خفض السرعة قليلاً لتجنب الحظر
+MAX_FORWARDS_PER_SECOND = 2
 FORWARD_QUEUE_MAX_SIZE = 2000
 
 # ====================== Ultra Smart Filter ======================
@@ -37,7 +37,6 @@ URL_PATTERN = re.compile(r"https?://|www\.", re.IGNORECASE)
 def normalize(text: str) -> str:
     if not text: return ""
     t = text.lower()
-    # تنظيف مكررات الحروف (مثال: واااجب -> واجب)
     t = re.sub(r"(.)\1{2,}", r"\1", t)
     return t
 
@@ -46,7 +45,6 @@ def calculate_score(text: str) -> float:
     if not norm or URL_PATTERN.search(norm): return 0.0
 
     words = norm.split()
-    # حساب النقاط بناءً على الكلمات المفتاحية
     intent_score = sum(3.5 for w in words if any(x in w for x in INTENT_WORDS))
     study_score  = sum(2.0 for w in words if any(x in w for x in STUDY_WORDS))
     help_score   = sum(1.0 for w in words if any(x in w for x in HELP_WORDS))
@@ -68,30 +66,13 @@ client = TelegramClient(StringSession(session), api_id, api_hash)
 async def process_forward_queue():
     global last_forward_time
     while forward_queue:
-        # التحكم في التدفق لتجنب الـ Flood
         now = time()
         delay = (1.0 / MAX_FORWARDS_PER_SECOND) - (now - last_forward_time)
         if delay > 0: await asyncio.sleep(delay)
 
         event = forward_queue.popleft()
         try:
-            chat = await event.get_chat()
-            chat_title = chat.title or "Private"
-            
-            # محاولة إنشاء رابط مباشر للرسالة
-            msg_link = f"https://t.me/c/{str(event.chat_id)[4:]}/{event.message.id}"
-            if getattr(chat, 'username', None):
-                msg_link = f"https://t.me/{chat.username}/{event.message.id}"
-
-            info = (
-                f"🎯 **طلب جديد مستهدف**\n"
-                f"👤 **المجموعة:** {chat_title}\n"
-                f"🔗 **رابط الرسالة:** [اضغط هنا]({msg_link})\n"
-                f"✍️ **النص:** `{event.text[:100]}...`"
-            )
-
-            await client.send_message("me", info, link_preview=False)
-            # تحويل الرسالة الأصلية لضمان رؤية الصور أو الملفات المرفقة
+            # === التعديل هنا: تحويل الرسالة فقط بدون أي نص إضافي ===
             await client.forward_messages("me", event.message)
             
             last_forward_time = time()
@@ -106,7 +87,6 @@ async def process_forward_queue():
 async def handler(event):
     if not event.text or not smart_filter(event.text): return
 
-    # نظام التبريد (Cooldown) لكل مستخدم
     user_id = event.sender_id
     now = time()
     if user_id in cooldown and now - cooldown[user_id] < COOLDOWN_SECONDS: return
@@ -116,13 +96,12 @@ async def handler(event):
 
     forward_queue.append(event)
     
-    # تشغيل المعالج إذا لم يكن يعمل
     if not hasattr(client, 'is_processing') or client.is_processing.done():
         client.is_processing = asyncio.create_task(process_forward_queue())
 
 async def main():
     await client.start()
-    print("🚀 البوت يعمل الآن ويراقب الطلبات...")
+    print("🚀 البوت يعمل الآن ويقوم بالتحويل المباشر فقط...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
