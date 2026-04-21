@@ -22,8 +22,8 @@ MAX_CACHE_SIZE = 5000
 MAX_MESSAGE_LENGTH = 150
 MIN_SCORE = 4
 
-MAX_FORWARDS_PER_SECOND = 3   # 🔥 أمان أكثر من 4
-FORWARD_QUEUE_MAX_SIZE = 2000  # 🔥 تقليل الضغط
+MAX_FORWARDS_PER_SECOND = 3
+FORWARD_QUEUE_MAX_SIZE = 2000
 
 # ====================== الكاش ======================
 forward_queue: deque = deque()
@@ -39,9 +39,9 @@ client = TelegramClient(
     flood_sleep_threshold=60
 )
 
-# ====================== فلترة (إذا عندك smart_filter لازم تكون معرفة) ======================
+# ====================== فلترة ======================
 def smart_filter(text):
-    return len(text) > 0  # مثال بسيط (عدله حسب احتياجك)
+    return len(text) > 0
 
 # ====================== معالجة الرسائل ======================
 async def should_process(event):
@@ -100,10 +100,13 @@ async def process_forward_queue():
         event = forward_queue.popleft()
 
         try:
-            await event.forward_to("me")
+            await client.forward_messages(
+                entity="me",
+                messages=event.message.id,
+                from_peer=event.chat_id
+            )
             last_forward_time = time()
 
-            # 🟡 سليب عشوائي لتقليل الحظر
             await asyncio.sleep(random.uniform(0.3, 0.8))
 
         except FloodWaitError as e:
